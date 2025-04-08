@@ -121,6 +121,7 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         samples.chains.cpu().numpy()
                     )  # n_env x denoising x horizon x act
                 action_venv = output_venv[:, : self.act_steps]
+                action_venv = action_venv[:, 0, :]
 
                 # Apply multi-step action
                 (

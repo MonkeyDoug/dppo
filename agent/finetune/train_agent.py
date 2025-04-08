@@ -13,7 +13,15 @@ import wandb
 import random
 
 log = logging.getLogger(__name__)
-from env.gym_utils import make_async
+
+import gymnasium as gym
+import gymnasium_robotics
+
+from gymnasium.spaces import Dict, Box
+from gymnasium.wrappers import TransformObservation
+from gymnasium.wrappers.vector import VectorizeTransformObservation
+
+gym.register_envs(gymnasium_robotics)
 
 
 class TrainAgent:
@@ -40,25 +48,47 @@ class TrainAgent:
         # Make vectorized env
         self.env_name = cfg.env.name
         env_type = cfg.env.get("env_type", None)
-        self.venv = make_async(
+        self.venv = gym.make_vec(
             cfg.env.name,
-            env_type=env_type,
             num_envs=cfg.env.n_envs,
-            asynchronous=True,
-            max_episode_steps=cfg.env.max_episode_steps,
-            wrappers=cfg.env.get("wrappers", None),
-            robomimic_env_cfg_path=cfg.get("robomimic_env_cfg_path", None),
-            shape_meta=cfg.get("shape_meta", None),
-            use_image_obs=cfg.env.get("use_image_obs", False),
-            render=cfg.env.get("render", False),
-            render_offscreen=cfg.env.get("save_video", False),
-            obs_dim=cfg.obs_dim,
-            action_dim=cfg.action_dim,
+            vectorization_mode="async",
             **cfg.env.specific if "specific" in cfg.env else {},
         )
+        self.venv = VectorizeTransformObservation(
+            env=self.venv,
+            wrapper=TransformObservation,
+            func=lambda obs: {
+                "state": np.concatenate((obs["observation"], obs["desired_goal"]))
+            },
+            observation_space=Dict(
+                {
+                    "state": Box(
+                        low=-np.inf,
+                        high=np.inf,
+                        shape=(6,),
+                        dtype=np.float64,
+                    )
+                }
+            ),
+            # func=lambda obs: {
+            #     "state": np.expand_dims(
+            #         np.concatenate((obs["observation"], obs["desired_goal"])), axis=0
+            #     )
+            # },
+            # observation_space=Dict(
+            #     {
+            #         "state": Box(
+            #             low=-np.inf,
+            #             high=np.inf,
+            #             shape=(1, 6),
+            #             dtype=np.float64,
+            #         )
+            #     }
+            # ),
+        )
         if not env_type == "furniture":
-            self.venv.seed(
-                [self.seed + i for i in range(cfg.env.n_envs)]
+            self.venv.reset(
+                seed=[self.seed + i for i in range(cfg.env.n_envs)]
             )  # otherwise parallel envs might have the same initial states!
             # isaacgym environments do not need seeding
         self.n_envs = cfg.env.n_envs
@@ -148,7 +178,8 @@ class TrainAgent:
             options_venv = [
                 {k: v for k, v in kwargs.items()} for _ in range(self.n_envs)
             ]
-        obs_venv = self.venv.reset_arg(options_list=options_venv)
+        # obs_venv = self.venv.reset_arg(options_list=options_venv)
+        obs_venv = self.venv.reset()[0]
         # convert to OrderedDict if obs_venv is a list of dict
         if isinstance(obs_venv, list):
             obs_venv = {
